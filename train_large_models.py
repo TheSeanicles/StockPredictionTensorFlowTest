@@ -163,7 +163,7 @@ def stock_predict(tickers_list):
 
                 in_w = 1500
                 OUT_STEPS = 1500
-                MAX_EPOCHS = 20
+                MAX_EPOCHS = 30
                 b_size = 1
 
                 def split_window(self, features):
@@ -307,21 +307,21 @@ def stock_predict(tickers_list):
                 ########################################################################
                 # Linear
                 ########################################################################
-                print('LINEAR')
-                multi_linear_model = tf.keras.Sequential([
-                    # Take the last time-step.
-                    # Shape [batch, time, features] => [batch, 1, features]
-                    tf.keras.layers.Lambda(lambda x: x[:, -1:, :]),
-                    # Shape => [batch, 1, out_steps*features]
-                    tf.keras.layers.Dense(OUT_STEPS * num_features,
-                                          kernel_initializer=tf.initializers.zeros()),
-                    # Shape => [batch, out_steps, features]
-                    tf.keras.layers.Reshape([OUT_STEPS, num_features])
-                ])
-
-                history = compile_and_fit(multi_linear_model, multi_window)
-
-                multi_val_performance['Linear'] = multi_linear_model.evaluate(multi_window.val, verbose=0)
+                # print('LINEAR')
+                # multi_linear_model = tf.keras.Sequential([
+                #     # Take the last time-step.
+                #     # Shape [batch, time, features] => [batch, 1, features]
+                #     tf.keras.layers.Lambda(lambda x: x[:, -1:, :]),
+                #     # Shape => [batch, 1, out_steps*features]
+                #     tf.keras.layers.Dense(OUT_STEPS * num_features,
+                #                           kernel_initializer=tf.initializers.zeros()),
+                #     # Shape => [batch, out_steps, features]
+                #     tf.keras.layers.Reshape([OUT_STEPS, num_features])
+                # ])
+                #
+                # history = compile_and_fit(multi_linear_model, multi_window)
+                #
+                # multi_val_performance['Linear'] = multi_linear_model.evaluate(multi_window.val, verbose=0)
                 # multi_window.plot(multi_linear_model)
 
                 ########################################################################
@@ -333,11 +333,9 @@ def stock_predict(tickers_list):
                     # Shape [batch, time, features] => [batch, 1, features]
                     tf.keras.layers.Lambda(lambda x: x[:, -1:, :]),
                     # Shape => [batch, 1, dense_units]
-                    tf.keras.layers.Dense(6000, activation='sigmoid'),
+                    tf.keras.layers.Dense(13500, activation='sigmoid'),
                     # Shape => [batch, 1, dense_units]
-                    tf.keras.layers.Dense(3000, activation='sigmoid'),
-                    # Shape => [batch, 1, dense_units]
-                    tf.keras.layers.Dense(6000, activation='sigmoid'),
+                    tf.keras.layers.Dense(9000, activation='sigmoid'),
                     # Shape => [batch, out_steps*features]
                     tf.keras.layers.Dense(OUT_STEPS * num_features,
                                           kernel_initializer=tf.initializers.zeros()),
@@ -395,28 +393,28 @@ def stock_predict(tickers_list):
                 ########################################################################
                 # Bench Comparison
                 ########################################################################
-                x = np.arange(len(multi_val_performance))
-                width = 0.3
-
-                metric_index = multi_linear_model.metrics_names.index('mean_absolute_error')
-                val_mae = [v[metric_index] for v in multi_val_performance.values()]
-
-                plt.bar(x - 0.17, val_mae, width, label='Validation')
-                plt.xticks(ticks=x, labels=multi_val_performance.keys(),
-                           rotation=45)
-                plt.ylabel(f'MAE (average over all times and outputs)')
-                _ = plt.legend()
-
-                plt.show()
-                for name, value in multi_val_performance.items():
-                    print(f'{name:8s}: {value[1]:0.4f}')
+                # x = np.arange(len(multi_val_performance))
+                # width = 0.3
+                #
+                # metric_index = multi_linear_model.metrics_names.index('mean_absolute_error')
+                # val_mae = [v[metric_index] for v in multi_val_performance.values()]
+                #
+                # plt.bar(x - 0.17, val_mae, width, label='Validation')
+                # plt.xticks(ticks=x, labels=multi_val_performance.keys(),
+                #            rotation=45)
+                # plt.ylabel(f'MAE (average over all times and outputs)')
+                # _ = plt.legend()
+                #
+                # plt.show()
+                # for name, value in multi_val_performance.items():
+                #     print(f'{name:8s}: {value[1]:0.4f}')
     # multi_linear_model.save('models/linear_stock_model')
-    # multi_dense_model.save('models/dense_stock_model')
+    multi_dense_model.save('models/dense_stock_model')
     # multi_conv_model.save('models/conv_stock_model')
     # multi_lstm_model.save('models/rnn_stock_model')
 
 
 if __name__ == '__main__':
-    # stock_predict(['AAPL'])
-    stock_predict(get_sp500())
+    stock_predict(['AAPL'])
+    # stock_predict(get_sp500())
 
