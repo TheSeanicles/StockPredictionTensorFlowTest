@@ -103,9 +103,8 @@ def stock_predict(tickers_list):
                 column_indices = {name: i for i, name in enumerate(df.columns)}
 
                 n = len(df)
-                train_df = df[0:int(n * 0.7)]
-                val_df = df[int(n * 0.7):int(n * 0.9)]
-                test_df = df[int(n * 0.9):]
+                train_df = df
+                val_df = df
 
                 num_features = df.shape[1]
 
@@ -115,7 +114,9 @@ def stock_predict(tickers_list):
 
                 train_df = (train_df - train_mean) / train_std
                 val_df = (val_df - train_mean) / train_std
-                test_df = (test_df - train_mean) / train_std
+
+                train_df.to_csv('train.csv')
+                val_df.to_csv('val.csv')
 
                 # PLOT NORMALIZED DATA
                 # df_std = (df - train_mean) / train_std
@@ -128,12 +129,11 @@ def stock_predict(tickers_list):
 
                 class WindowGenerator():
                     def __init__(self, input_width, label_width, shift,
-                                 train_df=train_df, val_df=val_df, test_df=test_df,
+                                 train_df=train_df, val_df=val_df,
                                  label_columns=None):
                         # Store the raw data.
                         self.train_df = train_df
                         self.val_df = val_df
-                        self.test_df = test_df
 
                         # Work out the label column indices.
                         self.label_columns = label_columns
@@ -161,10 +161,10 @@ def stock_predict(tickers_list):
                                           f'Label indices: {self.label_indices}',
                                           f'Label column name(s): {self.label_columns}'])
 
-                in_w = 100
-                OUT_STEPS = 100
+                in_w = 1500
+                OUT_STEPS = 1500
                 MAX_EPOCHS = 20
-                b_size = 32
+                b_size = 1
 
                 def split_window(self, features):
                     inputs = features[:, self.input_slice, :]
@@ -225,7 +225,7 @@ def stock_predict(tickers_list):
                         targets=None,
                         sequence_length=self.total_window_size,
                         sequence_stride=1,
-                        shuffle=True,
+                        shuffle=False,
                         batch_size=b_size, )
 
                     ds = ds.map(self.split_window)
@@ -243,10 +243,6 @@ def stock_predict(tickers_list):
                     return self.make_dataset(self.val_df)
 
                 @property
-                def test(self):
-                    return self.make_dataset(self.test_df)
-
-                @property
                 def example(self):
                     """Get and cache an example batch of `inputs, labels` for plotting."""
                     result = getattr(self, '_example', None)
@@ -259,7 +255,6 @@ def stock_predict(tickers_list):
 
                 WindowGenerator.train = train
                 WindowGenerator.val = val
-                WindowGenerator.test = test
                 WindowGenerator.example = example
 
                 def compile_and_fit(model, window, patience=2):
@@ -281,9 +276,9 @@ def stock_predict(tickers_list):
                 ########################################################################
                 multi_window = WindowGenerator(input_width=in_w,
                                                label_width=OUT_STEPS,
-                                               shift=OUT_STEPS,)
+                                               shift=OUT_STEPS)
 
-                multi_window.plot()
+                # multi_window.plot()
 
                 class MultiStepLastBaseline(tf.keras.Model):
                     def call(self, inputs):
@@ -294,11 +289,9 @@ def stock_predict(tickers_list):
                                       metrics=[tf.metrics.MeanAbsoluteError()])
 
                 multi_val_performance = {}
-                multi_performance = {}
 
-                multi_val_performance['Last'] = last_baseline.evaluate(multi_window.val)
-                multi_performance['Last'] = last_baseline.evaluate(multi_window.test, verbose=0)
-                multi_window.plot(last_baseline)
+                multi_val_performance['Last'] = last_baseline.evaluate(multi_window.val, verbose=0)
+                # multi_window.plot(last_baseline)
 
                 class RepeatBaseline(tf.keras.Model):
                     def call(self, inputs):
@@ -308,9 +301,8 @@ def stock_predict(tickers_list):
                 repeat_baseline.compile(loss=tf.losses.MeanSquaredError(),
                                         metrics=[tf.metrics.MeanAbsoluteError()])
 
-                multi_val_performance['Repeat'] = repeat_baseline.evaluate(multi_window.val)
-                multi_performance['Repeat'] = repeat_baseline.evaluate(multi_window.test, verbose=0)
-                multi_window.plot(repeat_baseline)
+                multi_val_performance['Repeat'] = repeat_baseline.evaluate(multi_window.val, verbose=0)
+                # multi_window.plot(repeat_baseline)
 
                 ########################################################################
                 # Linear
@@ -329,9 +321,8 @@ def stock_predict(tickers_list):
 
                 history = compile_and_fit(multi_linear_model, multi_window)
 
-                multi_val_performance['Linear'] = multi_linear_model.evaluate(multi_window.val)
-                multi_performance['Linear'] = multi_linear_model.evaluate(multi_window.test, verbose=0)
-                multi_window.plot(multi_linear_model)
+                multi_val_performance['Linear'] = multi_linear_model.evaluate(multi_window.val, verbose=0)
+                # multi_window.plot(multi_linear_model)
 
                 ########################################################################
                 # DNN
@@ -342,7 +333,11 @@ def stock_predict(tickers_list):
                     # Shape [batch, time, features] => [batch, 1, features]
                     tf.keras.layers.Lambda(lambda x: x[:, -1:, :]),
                     # Shape => [batch, 1, dense_units]
-                    tf.keras.layers.Dense(2000, activation='relu'),
+                    tf.keras.layers.Dense(6000, activation='sigmoid'),
+                    # Shape => [batch, 1, dense_units]
+                    tf.keras.layers.Dense(3000, activation='sigmoid'),
+                    # Shape => [batch, 1, dense_units]
+                    tf.keras.layers.Dense(6000, activation='sigmoid'),
                     # Shape => [batch, out_steps*features]
                     tf.keras.layers.Dense(OUT_STEPS * num_features,
                                           kernel_initializer=tf.initializers.zeros()),
@@ -352,73 +347,68 @@ def stock_predict(tickers_list):
 
                 history = compile_and_fit(multi_dense_model, multi_window)
 
-                multi_val_performance['Dense'] = multi_dense_model.evaluate(multi_window.val)
-                multi_performance['Dense'] = multi_dense_model.evaluate(multi_window.test, verbose=0)
+                multi_val_performance['Dense'] = multi_dense_model.evaluate(multi_window.val, verbose=0)
                 multi_window.plot(multi_dense_model)
 
                 ########################################################################
                 # CNN
                 ########################################################################
-                print('CNN')
-                CONV_WIDTH = 3
-                multi_conv_model = tf.keras.Sequential([
-                    # Shape [batch, time, features] => [batch, CONV_WIDTH, features]
-                    tf.keras.layers.Lambda(lambda x: x[:, -CONV_WIDTH:, :]),
-                    # Shape => [batch, 1, conv_units]
-                    tf.keras.layers.Conv1D(256, activation='relu', kernel_size=(CONV_WIDTH)),
-                    # Shape => [batch, 1,  out_steps*features]
-                    tf.keras.layers.Dense(OUT_STEPS * num_features,
-                                          kernel_initializer=tf.initializers.zeros()),
-                    # Shape => [batch, out_steps, features]
-                    tf.keras.layers.Reshape([OUT_STEPS, num_features])
-                ])
-
-                history = compile_and_fit(multi_conv_model, multi_window)
-
-                multi_val_performance['Conv'] = multi_conv_model.evaluate(multi_window.val)
-                multi_performance['Conv'] = multi_conv_model.evaluate(multi_window.test, verbose=0)
-                multi_window.plot(multi_conv_model)
+                # print('CNN')
+                # CONV_WIDTH = 3
+                # multi_conv_model = tf.keras.Sequential([
+                #     # Shape [batch, time, features] => [batch, CONV_WIDTH, features]
+                #     tf.keras.layers.Lambda(lambda x: x[:, -CONV_WIDTH:, :]),
+                #     # Shape => [batch, 1, conv_units]
+                #     tf.keras.layers.Conv1D(256, activation='relu', kernel_size=(CONV_WIDTH)),
+                #     # Shape => [batch, 1,  out_steps*features]
+                #     tf.keras.layers.Dense(OUT_STEPS * num_features,
+                #                           kernel_initializer=tf.initializers.zeros()),
+                #     # Shape => [batch, out_steps, features]
+                #     tf.keras.layers.Reshape([OUT_STEPS, num_features])
+                # ])
+                #
+                # history = compile_and_fit(multi_conv_model, multi_window)
+                #
+                # multi_val_performance['Conv'] = multi_conv_model.evaluate(multi_window.val, verbose=0)
+                # multi_window.plot(multi_conv_model)
 
                 ########################################################################
                 # RNN
                 ########################################################################
-                print('RNN')
-                multi_lstm_model = tf.keras.Sequential([
-                    # Shape [batch, time, features] => [batch, lstm_units].
-                    # Adding more `lstm_units` just overfits more quickly.
-                    tf.keras.layers.LSTM(32, return_sequences=False),
-                    # Shape => [batch, out_steps*features].
-                    tf.keras.layers.Dense(OUT_STEPS * num_features,
-                                          kernel_initializer=tf.initializers.zeros()),
-                    # Shape => [batch, out_steps, features].
-                    tf.keras.layers.Reshape([OUT_STEPS, num_features])
-                ])
-
-                history = compile_and_fit(multi_lstm_model, multi_window)
-
-                multi_val_performance['LSTM'] = multi_lstm_model.evaluate(multi_window.val)
-                multi_performance['LSTM'] = multi_lstm_model.evaluate(multi_window.test, verbose=0)
+                # print('RNN')
+                # multi_lstm_model = tf.keras.Sequential([
+                #     # Shape [batch, time, features] => [batch, lstm_units].
+                #     # Adding more `lstm_units` just overfits more quickly.
+                #     tf.keras.layers.LSTM(32, return_sequences=False),
+                #     # Shape => [batch, out_steps*features].
+                #     tf.keras.layers.Dense(OUT_STEPS * num_features,
+                #                           kernel_initializer=tf.initializers.zeros()),
+                #     # Shape => [batch, out_steps, features].
+                #     tf.keras.layers.Reshape([OUT_STEPS, num_features])
+                # ])
+                #
+                # history = compile_and_fit(multi_lstm_model, multi_window)
+                #
+                # multi_val_performance['LSTM'] = multi_lstm_model.evaluate(multi_window.val, verbose=0)
                 # multi_window.plot(multi_lstm_model)
 
                 ########################################################################
                 # Bench Comparison
                 ########################################################################
-                x = np.arange(len(multi_performance))
+                x = np.arange(len(multi_val_performance))
                 width = 0.3
 
-                metric_index = multi_lstm_model.metrics_names.index('mean_absolute_error')
+                metric_index = multi_linear_model.metrics_names.index('mean_absolute_error')
                 val_mae = [v[metric_index] for v in multi_val_performance.values()]
-                test_mae = [v[metric_index] for v in multi_performance.values()]
 
                 plt.bar(x - 0.17, val_mae, width, label='Validation')
-                plt.bar(x + 0.17, test_mae, width, label='Test')
-                plt.xticks(ticks=x, labels=multi_performance.keys(),
+                plt.xticks(ticks=x, labels=multi_val_performance.keys(),
                            rotation=45)
                 plt.ylabel(f'MAE (average over all times and outputs)')
                 _ = plt.legend()
 
                 plt.show()
-                for name, value in multi_performance.items():
+                for name, value in multi_val_performance.items():
                     print(f'{name:8s}: {value[1]:0.4f}')
     # multi_linear_model.save('models/linear_stock_model')
     # multi_dense_model.save('models/dense_stock_model')
@@ -427,6 +417,6 @@ def stock_predict(tickers_list):
 
 
 if __name__ == '__main__':
-    stock_predict(['AAPL'])
-    # stock_predict(get_sp500())
+    # stock_predict(['AAPL'])
+    stock_predict(get_sp500())
 

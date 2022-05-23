@@ -194,7 +194,7 @@ def stock_predict(t):
             WindowGenerator.plot = plot
 
             ################################################################################################
-            # DNN Model Test
+            # Model Test
             ################################################################################################
             lin = tf.keras.models.load_model('models/linear_stock_model')
             dnn = tf.keras.models.load_model('models/dense_stock_model')
@@ -216,7 +216,7 @@ def stock_predict(t):
 
             input_frame.plot(model=lin)
             input_frame.plot(model=dnn)
-            input_frame.plot(model=conv)
+            # input_frame.plot(model=conv)
             input_frame.plot(model=rnn)
 
 
