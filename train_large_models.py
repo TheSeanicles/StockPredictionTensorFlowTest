@@ -1,17 +1,13 @@
+# https://www.tensorflow.org/tutorials/structured_data/time_series
+# ----------------------------------------------------------------
 import tensorflow as tf
-from tensorflow import keras
 import pandas as pd
 import numpy as np
 import datetime
 import yfinance as yf
 import matplotlib.pyplot as plt
-import seaborn as sns
 from os.path import exists
-
-global multi_linear_model
-global multi_dense_model
-global multi_conv_model
-global multi_lstm_model
+import pathlib
 
 
 # data = stockDataFetch(['AAPL'], 'max', '1d')
@@ -50,24 +46,46 @@ def plot_stock_data(tickers_list, time_duration, time_interval):
 
 def get_sp500():
     tickers = pd.read_html('https://en.wikipedia.org/wiki/List_of_S%26P_500_companies')[0]
-    return tickers.Symbol.to_list()
+    stock_list = tickers.Symbol.to_list()
+    for sl in stock_list:
+        if '.' in sl:
+            stock_list.remove(sl)
+    return stock_list
 
 
-def stock_predict(tickers_list):
+def save_sp500():
+    t_list = get_sp500()
     tod = datetime.datetime.now()
     d59 = datetime.timedelta(days=59)
     past = tod - d59
     day = datetime.timedelta(days=1)
-    f = open('last_download.txt', 'r')
-    try:
-        last_download = f.read()
+    if exists('last_download.txt'):
+        f = open('last_download.txt', 'r')
+        try:
+            last_download = f.read()
+            f.close()
+            last_date = datetime.datetime.strptime(last_download, '%Y-%m-%d %H:%M:%S.%f')
+        except ValueError:
+            last_date = tod - day
         f.close()
-        last_date = datetime.datetime.strptime(last_download, '%Y-%m-%d %H:%M:%S.%f')
-    except ValueError:
-        f.close()
-        last_date = tod - day
-    if tod - last_date >= day:
-        for t in tickers_list:
+        if tod - last_date >= day:
+            for t in t_list:
+                # GRAB DATA FROM YAHOO FINANCE
+                data = yf.download([t],
+                                   start=past.date(),
+                                   end=tod.date(),
+                                   interval='5m',
+                                   group_by='ticker',
+                                   threads='True')
+
+                # EXPORT DATA AND GRAB DATA TO BETTER MANIPULATE
+                data.to_csv('data/' + t + '.csv')
+
+            with open('last_download.txt', 'w') as f:
+                write_str = tod.strftime('%Y-%m-%d %H:%M:%S.%f')
+                f.write(write_str)
+    else:
+        for t in t_list:
             # GRAB DATA FROM YAHOO FINANCE
             data = yf.download([t],
                                start=past.date(),
@@ -83,11 +101,13 @@ def stock_predict(tickers_list):
             write_str = tod.strftime('%Y-%m-%d %H:%M:%S.%f')
             f.write(write_str)
 
+
+def create_stock_dataframes(tickers_list):
     for t in tickers_list:
         print(t)
         if exists('data/' + t + '.csv'):
             df = pd.read_csv(r'data/' + t + '.csv')
-            if len(df) > 2000:
+            if len(df) > 2600:
                 # MAKE DATE TIME MORE RELEVANT FOR RNN
                 date_time = pd.to_datetime(df.pop('Datetime'), format='%Y-%m-%d %H:%M:%S%z')
                 timestamp_s = date_time.map(pd.Timestamp.timestamp)
@@ -103,20 +123,26 @@ def stock_predict(tickers_list):
                 column_indices = {name: i for i, name in enumerate(df.columns)}
 
                 n = len(df)
-                train_df = df
-                val_df = df
+                # t_df = df[0:1300+1]
+                # v_df = df[1300+1:2600+1]
+                t_df = df[:2600]
+                v_df = df[:2600]
 
                 num_features = df.shape[1]
 
                 # DATA NORMALIZATION
-                train_mean = train_df.mean()
-                train_std = train_df.std()
+                train_mean = t_df.mean()
+                train_std = t_df.std()
 
-                train_df = (train_df - train_mean) / train_std
-                val_df = (val_df - train_mean) / train_std
+                t_df = (t_df - train_mean) / train_std
+                v_df = (v_df - train_mean) / train_std
 
-                train_df.to_csv('train.csv')
-                val_df.to_csv('val.csv')
+                if tickers_list.index(t) == 0:
+                    train_df = t_df
+                    val_df = v_df
+                else:
+                    train_df = pd.concat([train_df, t_df])
+                    val_df = pd.concat([val_df, v_df])
 
                 # PLOT NORMALIZED DATA
                 # df_std = (df - train_mean) / train_std
@@ -126,295 +152,306 @@ def stock_predict(tickers_list):
                 # _ = ax.set_xticklabels(df.keys(), rotation=90)
                 #
                 # plt.show()
+    return train_df, val_df, num_features
 
-                class WindowGenerator():
-                    def __init__(self, input_width, label_width, shift,
-                                 train_df=train_df, val_df=val_df,
-                                 label_columns=None):
-                        # Store the raw data.
-                        self.train_df = train_df
-                        self.val_df = val_df
 
-                        # Work out the label column indices.
-                        self.label_columns = label_columns
-                        if label_columns is not None:
-                            self.label_columns_indices = {name: i for i, name in enumerate(label_columns)}
-                        self.column_indices = {name: i for i, name in enumerate(train_df.columns)}
+def stock_predict(tickers_list):
+    train_df, val_df, num_features = create_stock_dataframes(tickers_list)
+    train_df.to_csv('train.csv')
+    val_df.to_csv('val.csv')
 
-                        # Work out the window parameters.
-                        self.input_width = input_width
-                        self.label_width = label_width
-                        self.shift = shift
+    class WindowGenerator():
+        def __init__(self, input_width, label_width, shift,
+                     train_df=train_df, val_df=val_df,
+                     label_columns=None):
+            # Store the raw data.
+            self.train_df = train_df
+            self.val_df = val_df
 
-                        self.total_window_size = input_width + shift
+            # Work out the label column indices.
+            self.label_columns = label_columns
+            if label_columns is not None:
+                self.label_columns_indices = {name: i for i, name in enumerate(label_columns)}
+            self.column_indices = {name: i for i, name in enumerate(train_df.columns)}
 
-                        self.input_slice = slice(0, input_width)
-                        self.input_indices = np.arange(self.total_window_size)[self.input_slice]
+            # Work out the window parameters.
+            self.input_width = input_width
+            self.label_width = label_width
+            self.shift = shift
 
-                        self.label_start = self.total_window_size - self.label_width
-                        self.labels_slice = slice(self.label_start, None)
-                        self.label_indices = np.arange(self.total_window_size)[self.labels_slice]
+            self.total_window_size = input_width + shift
 
-                    def __repr__(self):
-                        return '\n'.join([f'Total window size: {self.total_window_size}',
-                                          f'Input indices: {self.input_indices}',
-                                          f'Label indices: {self.label_indices}',
-                                          f'Label column name(s): {self.label_columns}'])
+            self.input_slice = slice(0, input_width)
+            self.input_indices = np.arange(self.total_window_size)[self.input_slice]
 
-                in_w = 1500
-                OUT_STEPS = 1500
-                MAX_EPOCHS = 30
-                b_size = 1
+            self.label_start = self.total_window_size - self.label_width
+            self.labels_slice = slice(self.label_start, None)
+            self.label_indices = np.arange(self.total_window_size)[self.labels_slice]
 
-                def split_window(self, features):
-                    inputs = features[:, self.input_slice, :]
-                    labels = features[:, self.labels_slice, :]
-                    if self.label_columns is not None:
-                        labels = tf.stack(
-                            [labels[:, :, self.column_indices[name]] for name in self.label_columns],
-                            axis=-1)
+        def __repr__(self):
+            return '\n'.join([f'Total window size: {self.total_window_size}',
+                              f'Input indices: {self.input_indices}',
+                              f'Label indices: {self.label_indices}',
+                              f'Label column name(s): {self.label_columns}'])
 
-                    # Slicing doesn't preserve static shape information, so set the shapes
-                    # manually. This way the `tf.data.Datasets` are easier to inspect.
-                    inputs.set_shape([None, self.input_width, None])
-                    labels.set_shape([None, self.label_width, None])
+    in_w = 1300
+    OUT_STEPS = 1300
+    MAX_EPOCHS = 200
+    b_size = len(tickers_list)
 
-                    return inputs, labels
+    def split_window(self, features):
+        inputs = features[:, self.input_slice, :]
+        labels = features[:, self.labels_slice, :]
+        if self.label_columns is not None:
+            labels = tf.stack(
+                [labels[:, :, self.column_indices[name]] for name in self.label_columns],
+                axis=-1)
 
-                WindowGenerator.split_window = split_window
+        # Slicing doesn't preserve static shape information, so set the shapes
+        # manually. This way the `tf.data.Datasets` are easier to inspect.
+        inputs.set_shape([None, self.input_width, None])
+        labels.set_shape([None, self.label_width, None])
 
-                def plot(self, model=None, plot_col='Close', max_subplots=3):
-                    inputs, labels = self.example
-                    plt.figure(figsize=(12, 8))
-                    plot_col_index = self.column_indices[plot_col]
-                    max_n = min(max_subplots, len(inputs))
-                    for n in range(max_n):
-                        plt.subplot(max_n, 1, n + 1)
-                        plt.ylabel(f'{plot_col} [normed]')
-                        plt.plot(self.input_indices, inputs[n, :, plot_col_index],
-                                 label='Inputs', marker='.', zorder=-10)
+        return inputs, labels
 
-                        if self.label_columns:
-                            label_col_index = self.label_columns_indices.get(plot_col, None)
-                        else:
-                            label_col_index = plot_col_index
+    WindowGenerator.split_window = split_window
 
-                        if label_col_index is None:
-                            continue
+    def plot(self, model=None, plot_col='Close', max_subplots=3):
+        inputs, labels = self.example
+        plt.figure(figsize=(12, 8))
+        plot_col_index = self.column_indices[plot_col]
+        max_n = min(max_subplots, len(inputs))
+        for n in range(max_n):
+            plt.subplot(max_n, 1, n + 1)
+            plt.ylabel(f'{plot_col} [normed]')
+            plt.plot(self.input_indices, inputs[n, :, plot_col_index],
+                     label='Inputs', marker='.', zorder=-10)
 
-                        plt.scatter(self.label_indices, labels[n, :, label_col_index],
-                                    edgecolors='k', label='Labels', c='#2ca02c', s=64)
-                        if model is not None:
-                            predictions = model(inputs)
-                            plt.scatter(self.label_indices, predictions[n, :, label_col_index],
-                                        marker='X', edgecolors='k', label='Predictions',
-                                        c='#ff7f0e', s=64)
+            if self.label_columns:
+                label_col_index = self.label_columns_indices.get(plot_col, None)
+            else:
+                label_col_index = plot_col_index
 
-                        if n == 0:
-                            plt.legend()
+            if label_col_index is None:
+                continue
 
-                    plt.xlabel('Time [h]')
-                    plt.show()
+            plt.scatter(self.label_indices, labels[n, :, label_col_index],
+                        edgecolors='k', label='Labels', c='#2ca02c', s=64)
+            if model is not None:
+                predictions = model(inputs)
+                plt.scatter(self.label_indices, predictions[n, :, label_col_index],
+                            marker='X', edgecolors='k', label='Predictions',
+                            c='#ff7f0e', s=64)
 
-                WindowGenerator.plot = plot
+            if n == 0:
+                plt.legend()
 
-                def make_dataset(self, dataset):
-                    dataset = np.array(dataset, dtype=np.float32)
-                    ds = tf.keras.utils.timeseries_dataset_from_array(
-                        data=dataset,
-                        targets=None,
-                        sequence_length=self.total_window_size,
-                        sequence_stride=1,
-                        shuffle=False,
-                        batch_size=b_size, )
+        plt.xlabel('Time [5 min]')
+        plt.show()
 
-                    ds = ds.map(self.split_window)
+    WindowGenerator.plot = plot
 
-                    return ds
+    def make_dataset(self, dataset):
+        dataset = np.array(dataset, dtype=np.float32)
+        ds = tf.keras.utils.timeseries_dataset_from_array(
+            data=dataset,
+            targets=None,
+            sequence_length=in_w+OUT_STEPS,
+            sampling_rate=1,
+            sequence_stride=in_w+OUT_STEPS,
+            shuffle=False,
+            batch_size=b_size, )
 
-                WindowGenerator.make_dataset = make_dataset
+        ds = ds.map(self.split_window)
 
-                @property
-                def train(self):
-                    return self.make_dataset(self.train_df)
+        return ds
 
-                @property
-                def val(self):
-                    return self.make_dataset(self.val_df)
+    WindowGenerator.make_dataset = make_dataset
 
-                @property
-                def example(self):
-                    """Get and cache an example batch of `inputs, labels` for plotting."""
-                    result = getattr(self, '_example', None)
-                    if result is None:
-                        # No example batch was found, so get one from the `.train` dataset
-                        result = next(iter(self.train))
-                        # And cache it for next time
-                        self._example = result
-                    return result
+    @property
+    def train(self):
+        return self.make_dataset(self.train_df)
 
-                WindowGenerator.train = train
-                WindowGenerator.val = val
-                WindowGenerator.example = example
+    @property
+    def val(self):
+        return self.make_dataset(self.val_df)
 
-                def compile_and_fit(model, window, patience=2):
-                    early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss',
-                                                                      patience=patience,
-                                                                      mode='min')
+    @property
+    def example(self):
+        """Get and cache an example batch of `inputs, labels` for plotting."""
+        result = getattr(self, '_example', None)
+        if result is None:
+            # No example batch was found, so get one from the `.train` dataset
+            result = next(iter(self.train))
+            # And cache it for next time
+            self._example = result
+        return result
 
-                    model.compile(loss=tf.losses.MeanSquaredError(),
-                                  optimizer=tf.optimizers.Adam(),
-                                  metrics=[tf.metrics.MeanAbsoluteError()])
+    WindowGenerator.train = train
+    WindowGenerator.val = val
+    WindowGenerator.example = example
 
-                    history = model.fit(window.train, epochs=MAX_EPOCHS,
-                                        validation_data=window.val,
-                                        callbacks=[early_stopping])
-                    return history
+    def compile_and_fit(model, window, patience=2):
+        early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss',
+                                                          patience=patience,
+                                                          mode='min')
 
-                ########################################################################
-                # Baseline
-                ########################################################################
-                multi_window = WindowGenerator(input_width=in_w,
-                                               label_width=OUT_STEPS,
-                                               shift=OUT_STEPS)
+        model.compile(loss=tf.losses.MeanSquaredError(),
+                      optimizer=tf.optimizers.Adam(),
+                      metrics=[tf.metrics.MeanAbsoluteError()])
 
-                # multi_window.plot()
+        history = model.fit(window.train, epochs=MAX_EPOCHS,
+                            validation_data=window.val,
+                            callbacks=[early_stopping])
 
-                class MultiStepLastBaseline(tf.keras.Model):
-                    def call(self, inputs):
-                        return tf.tile(inputs[:, -1:, :], [1, OUT_STEPS, 1])
+        return history
 
-                last_baseline = MultiStepLastBaseline()
-                last_baseline.compile(loss=tf.losses.MeanSquaredError(),
-                                      metrics=[tf.metrics.MeanAbsoluteError()])
+    ########################################################################
+    # Baseline
+    ########################################################################
+    multi_window = WindowGenerator(input_width=in_w,
+                                   label_width=OUT_STEPS,
+                                   shift=OUT_STEPS)
+    # multi_window.plot()
 
-                multi_val_performance = {}
+    class MultiStepLastBaseline(tf.keras.Model):
+        def call(self, inputs):
+            return tf.tile(inputs[:, -1:, :], [1, OUT_STEPS, 1])
 
-                multi_val_performance['Last'] = last_baseline.evaluate(multi_window.val, verbose=0)
-                # multi_window.plot(last_baseline)
+    last_baseline = MultiStepLastBaseline()
+    last_baseline.compile(loss=tf.losses.MeanSquaredError(),
+                          metrics=[tf.metrics.MeanAbsoluteError()])
 
-                class RepeatBaseline(tf.keras.Model):
-                    def call(self, inputs):
-                        return inputs
+    multi_val_performance = {}
 
-                repeat_baseline = RepeatBaseline()
-                repeat_baseline.compile(loss=tf.losses.MeanSquaredError(),
-                                        metrics=[tf.metrics.MeanAbsoluteError()])
+    multi_val_performance['Last'] = last_baseline.evaluate(multi_window.val, verbose=0)
+    # multi_window.plot(last_baseline)
 
-                multi_val_performance['Repeat'] = repeat_baseline.evaluate(multi_window.val, verbose=0)
-                # multi_window.plot(repeat_baseline)
+    class RepeatBaseline(tf.keras.Model):
+        def call(self, inputs):
+            return inputs
 
-                ########################################################################
-                # Linear
-                ########################################################################
-                # print('LINEAR')
-                # multi_linear_model = tf.keras.Sequential([
-                #     # Take the last time-step.
-                #     # Shape [batch, time, features] => [batch, 1, features]
-                #     tf.keras.layers.Lambda(lambda x: x[:, -1:, :]),
-                #     # Shape => [batch, 1, out_steps*features]
-                #     tf.keras.layers.Dense(OUT_STEPS * num_features,
-                #                           kernel_initializer=tf.initializers.zeros()),
-                #     # Shape => [batch, out_steps, features]
-                #     tf.keras.layers.Reshape([OUT_STEPS, num_features])
-                # ])
-                #
-                # history = compile_and_fit(multi_linear_model, multi_window)
-                #
-                # multi_val_performance['Linear'] = multi_linear_model.evaluate(multi_window.val, verbose=0)
-                # multi_window.plot(multi_linear_model)
+    repeat_baseline = RepeatBaseline()
+    repeat_baseline.compile(loss=tf.losses.MeanSquaredError(),
+                            metrics=[tf.metrics.MeanAbsoluteError()])
 
-                ########################################################################
-                # DNN
-                ########################################################################
-                print('DNN')
-                multi_dense_model = tf.keras.Sequential([
-                    # Take the last time step.
-                    # Shape [batch, time, features] => [batch, 1, features]
-                    tf.keras.layers.Lambda(lambda x: x[:, -1:, :]),
-                    # Shape => [batch, 1, dense_units]
-                    tf.keras.layers.Dense(13500, activation='sigmoid'),
-                    # Shape => [batch, 1, dense_units]
-                    tf.keras.layers.Dense(9000, activation='sigmoid'),
-                    # Shape => [batch, out_steps*features]
-                    tf.keras.layers.Dense(OUT_STEPS * num_features,
-                                          kernel_initializer=tf.initializers.zeros()),
-                    # Shape => [batch, out_steps, features]
-                    tf.keras.layers.Reshape([OUT_STEPS, num_features])
-                ])
+    multi_val_performance['Repeat'] = repeat_baseline.evaluate(multi_window.val, verbose=0)
+    # multi_window.plot(repeat_baseline)
 
-                history = compile_and_fit(multi_dense_model, multi_window)
+    ########################################################################
+    # Linear
+    ########################################################################
+    print('LINEAR')
+    multi_linear_model = tf.keras.Sequential([
+        # Take the last time-step.
+        # Shape [batch, time, features] => [batch, 1, features]
+        tf.keras.layers.Lambda(lambda x: x[:, -1:, :]),
+        # Shape => [batch, 1, out_steps*features]
+        tf.keras.layers.Dense(OUT_STEPS * num_features,
+                              kernel_initializer=tf.initializers.zeros()),
+        # Shape => [batch, out_steps, features]
+        tf.keras.layers.Reshape([OUT_STEPS, num_features])
+    ])
 
-                multi_val_performance['Dense'] = multi_dense_model.evaluate(multi_window.val, verbose=0)
-                multi_window.plot(multi_dense_model)
+    history = compile_and_fit(multi_linear_model, multi_window)
 
-                ########################################################################
-                # CNN
-                ########################################################################
-                # print('CNN')
-                # CONV_WIDTH = 3
-                # multi_conv_model = tf.keras.Sequential([
-                #     # Shape [batch, time, features] => [batch, CONV_WIDTH, features]
-                #     tf.keras.layers.Lambda(lambda x: x[:, -CONV_WIDTH:, :]),
-                #     # Shape => [batch, 1, conv_units]
-                #     tf.keras.layers.Conv1D(256, activation='relu', kernel_size=(CONV_WIDTH)),
-                #     # Shape => [batch, 1,  out_steps*features]
-                #     tf.keras.layers.Dense(OUT_STEPS * num_features,
-                #                           kernel_initializer=tf.initializers.zeros()),
-                #     # Shape => [batch, out_steps, features]
-                #     tf.keras.layers.Reshape([OUT_STEPS, num_features])
-                # ])
-                #
-                # history = compile_and_fit(multi_conv_model, multi_window)
-                #
-                # multi_val_performance['Conv'] = multi_conv_model.evaluate(multi_window.val, verbose=0)
-                # multi_window.plot(multi_conv_model)
+    multi_val_performance['Linear'] = multi_linear_model.evaluate(multi_window.val, verbose=0)
+    multi_window.plot(multi_linear_model)
 
-                ########################################################################
-                # RNN
-                ########################################################################
-                # print('RNN')
-                # multi_lstm_model = tf.keras.Sequential([
-                #     # Shape [batch, time, features] => [batch, lstm_units].
-                #     # Adding more `lstm_units` just overfits more quickly.
-                #     tf.keras.layers.LSTM(32, return_sequences=False),
-                #     # Shape => [batch, out_steps*features].
-                #     tf.keras.layers.Dense(OUT_STEPS * num_features,
-                #                           kernel_initializer=tf.initializers.zeros()),
-                #     # Shape => [batch, out_steps, features].
-                #     tf.keras.layers.Reshape([OUT_STEPS, num_features])
-                # ])
-                #
-                # history = compile_and_fit(multi_lstm_model, multi_window)
-                #
-                # multi_val_performance['LSTM'] = multi_lstm_model.evaluate(multi_window.val, verbose=0)
-                # multi_window.plot(multi_lstm_model)
+    ########################################################################
+    # DNN
+    ########################################################################
+    # print('DNN')
+    # multi_dense_model = tf.keras.Sequential([
+    #     # Take the last time step.
+    #     # Shape [batch, time, features] => [batch, 1, features]
+    #     tf.keras.layers.Lambda(lambda x: x[:, -1:, :]),
+    #     # Shape => [batch, 1, dense_units]
+    #     tf.keras.layers.Dense(14300, activation='sigmoid'),
+    #     # Shape => [batch, 1, dense_units]
+    #     tf.keras.layers.Dense(9100, activation='sigmoid'),
+    #     # Shape => [batch, out_steps*featuchrres]
+    #     tf.keras.layers.Dense(OUT_STEPS * num_features,
+    #                           kernel_initializer=tf.initializers.zeros()),
+    #     # Shape => [batch, out_steps, features]
+    #     tf.keras.layers.Reshape([OUT_STEPS, num_features])
+    # ])
+    #
+    # history = compile_and_fit(multi_dense_model, multi_window)
+    #
+    # multi_val_performance['Dense'] = multi_dense_model.evaluate(multi_window.val, verbose=0)
+    # multi_window.plot(multi_dense_model)
 
-                ########################################################################
-                # Bench Comparison
-                ########################################################################
-                # x = np.arange(len(multi_val_performance))
-                # width = 0.3
-                #
-                # metric_index = multi_linear_model.metrics_names.index('mean_absolute_error')
-                # val_mae = [v[metric_index] for v in multi_val_performance.values()]
-                #
-                # plt.bar(x - 0.17, val_mae, width, label='Validation')
-                # plt.xticks(ticks=x, labels=multi_val_performance.keys(),
-                #            rotation=45)
-                # plt.ylabel(f'MAE (average over all times and outputs)')
-                # _ = plt.legend()
-                #
-                # plt.show()
-                # for name, value in multi_val_performance.items():
-                #     print(f'{name:8s}: {value[1]:0.4f}')
+    ########################################################################
+    # CNN
+    ########################################################################
+    print('CNN')
+    CONV_WIDTH = 3
+    multi_conv_model = tf.keras.Sequential([
+        # Shape [batch, time, features] => [batch, CONV_WIDTH, features]
+        tf.keras.layers.Lambda(lambda x: x[:, -CONV_WIDTH:, :]),
+        # Shape => [batch, 1, conv_units]
+        tf.keras.layers.Conv1D(256, activation='relu', kernel_size=(CONV_WIDTH)),
+        # Shape => [batch, 1,  out_steps*features]
+        tf.keras.layers.Dense(OUT_STEPS * num_features,
+                              kernel_initializer=tf.initializers.zeros()),
+        # Shape => [batch, out_steps, features]
+        tf.keras.layers.Reshape([OUT_STEPS, num_features])
+    ])
+
+    history = compile_and_fit(multi_conv_model, multi_window)
+
+    multi_val_performance['Conv'] = multi_conv_model.evaluate(multi_window.val, verbose=0)
+    multi_window.plot(multi_conv_model)
+
+    ########################################################################
+    # RNN
+    ########################################################################
+    print('RNN')
+    multi_lstm_model = tf.keras.Sequential([
+        # Shape [batch, time, features] => [batch, lstm_units].
+        # Adding more `lstm_units` just overfits more quickly.
+        tf.keras.layers.LSTM(32, return_sequences=False),
+        # Shape => [batch, out_steps*features].
+        tf.keras.layers.Dense(OUT_STEPS * num_features,
+                              kernel_initializer=tf.initializers.zeros()),
+        # Shape => [batch, out_steps, features].
+        tf.keras.layers.Reshape([OUT_STEPS, num_features])
+    ])
+
+    history = compile_and_fit(multi_lstm_model, multi_window)
+
+    multi_val_performance['LSTM'] = multi_lstm_model.evaluate(multi_window.val, verbose=0)
+    multi_window.plot(multi_lstm_model)
+
+    ########################################################################
+    # Bench Comparison
+    ########################################################################
+    x = np.arange(len(multi_val_performance))
+    width = 0.3
+
+    metric_index = multi_linear_model.metrics_names.index('mean_absolute_error')
+    val_mae = [v[metric_index] for v in multi_val_performance.values()]
+
+    plt.bar(x - 0.17, val_mae, width, label='Validation')
+    plt.xticks(ticks=x, labels=multi_val_performance.keys(),
+               rotation=45)
+    plt.ylabel(f'MAE (average over all times and outputs)')
+    _ = plt.legend()
+
+    plt.show()
+    for name, value in multi_val_performance.items():
+        print(f'{name:8s}: {value[1]:0.4f}')
     # multi_linear_model.save('models/linear_stock_model')
-    multi_dense_model.save('models/dense_stock_model')
+    # multi_dense_model.save('models/dense_stock_model')
     # multi_conv_model.save('models/conv_stock_model')
     # multi_lstm_model.save('models/rnn_stock_model')
 
 
 if __name__ == '__main__':
-    stock_predict(['AAPL'])
-    # stock_predict(get_sp500())
+    # save_sp500()
+    # stock_predict(['AAPL','TSLA'])
+    stock_predict(get_sp500())
+
+
 
