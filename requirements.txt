@@ -4,3 +4,4 @@ yfinance==0.1.70
 matplotlib==3.5.1
 numpy==1.22.0
 seaborn==0.11.2
+PyYAML==6.0

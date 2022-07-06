@@ -2,6 +2,13 @@ import pandas as pd
 import datetime
 import yfinance as yf
 import matplotlib.pyplot as plt
+from os.path import exists
+import os
+import yaml
+
+
+with open('config.yml', 'r') as file:
+    config = yaml.safe_load(file)
 
 
 # data = stockDataFetch(['AAPL'], 'max', '1d')
@@ -48,31 +55,50 @@ def stock_save(tickers_list):
     d59 = datetime.timedelta(days=59)
     past = tod - d59
     day = datetime.timedelta(days=1)
-    f = open('last_download.txt', 'r')
-    try:
+    if exists(config['path'] + '/last_download.txt'):
+        f = open(config['path'] + '/last_download.txt', 'r')
         last_download = f.read()
         f.close()
         last_date = datetime.datetime.strptime(last_download, '%Y-%m-%d %H:%M:%S.%f')
-    except ValueError:
-        f.close()
+    else:
         last_date = tod - day
     if tod - last_date >= day:
         for t in tickers_list:
             # GRAB DATA FROM YAHOO FINANCE
-            data = yf.download([t],
+            new_data = yf.download([t],
                                start=past.date(),
-                               end=tod.date(),
+                               # end=tod.date(),
                                interval='5m',
                                group_by='ticker',
                                threads='True')
 
             # EXPORT DATA AND GRAB DATA TO BETTER MANIPULATE
-            data.to_csv('data/' + t + '.csv')
+            if exists(config['path'] + '/' + t + '.csv'):
+                original_data = pd.read_csv(config['path'] + '/' + t + '.csv')
+                new_data.merge(original_data)
+                new_data.to_csv(config['path'] + '/' + t + '.csv')
+            else:
+                new_data.to_csv(config['path'] + '/' + t + '.csv')
 
-        with open('last_download.txt', 'w') as f:
+        with open(config['path'] + '/last_download.txt', 'w') as f:
             write_str = tod.strftime('%Y-%m-%d %H:%M:%S.%f')
             f.write(write_str)
 
 
+def delete_last_download():
+    if exists(config['path'] + '/last_download.txt'):
+        os.remove(config['path'] + '/last_download.txt')
+
+
+def delete_all_data():
+    files_in_path = os.listdir(config['path'])
+    for f in files_in_path:
+        os.remove(config['path'] + '/' + f)
+
+
 if __name__ == '__main__':
+    if config['delete_data']:
+        delete_all_data()
+    if config['delete_last_download']:
+        delete_last_download()
     stock_save(get_sp500())
