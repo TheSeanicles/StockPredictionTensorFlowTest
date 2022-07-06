@@ -67,18 +67,18 @@ def stock_save(tickers_list):
             # GRAB DATA FROM YAHOO FINANCE
             new_data = yf.download([t],
                                start=past.date(),
-                               # end=tod.date(),
+                               end=tod.date(),
                                interval='5m',
                                group_by='ticker',
                                threads='True')
-
-            # EXPORT DATA AND GRAB DATA TO BETTER MANIPULATE
-            if exists(config['path'] + '/' + t + '.csv'):
-                original_data = pd.read_csv(config['path'] + '/' + t + '.csv')
-                new_data.merge(original_data)
-                new_data.to_csv(config['path'] + '/' + t + '.csv')
-            else:
-                new_data.to_csv(config['path'] + '/' + t + '.csv')
+            if ~new_data.empty:
+                # EXPORT DATA TO BETTER MANIPULATE
+                if exists(config['path'] + '/' + t + '.csv'):
+                    original_data = pd.read_csv(config['path'] + '/' + t + '.csv')
+                    new_data.merge(original_data)
+                    new_data.to_csv(config['path'] + '/' + t + '.csv')
+                else:
+                    new_data.to_csv(config['path'] + '/' + t + '.csv')
 
         with open(config['path'] + '/last_download.txt', 'w') as f:
             write_str = tod.strftime('%Y-%m-%d %H:%M:%S.%f')
@@ -97,8 +97,14 @@ def delete_all_data():
 
 
 if __name__ == '__main__':
+    tick_list = []
     if config['delete_data']:
         delete_all_data()
     if config['delete_last_download']:
         delete_last_download()
-    stock_save(get_sp500())
+    if config['S&P500']:
+        for t in get_sp500():
+            tick_list.append(t)
+    for t in config['tickers']:
+        tick_list.append(t)
+    stock_save(tick_list)
