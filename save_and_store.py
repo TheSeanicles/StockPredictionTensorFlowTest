@@ -25,10 +25,10 @@ def stock_data_fetch(tickers_list, time_duration, time_interval):
 #
 # fetch data by interval (including intraday if period < 60 days)
 # valid intervals: 1m,2m,5m,15m,30m,60m,90m,1h,1d,5d,1wk,1mo,3mo
-def plot_stock_data(tickers_list, time_duration, time_interval):
+def plot_stock_data_download(tickers_list, time_duration, time_interval):
     data = stock_data_fetch(tickers_list, time_duration, time_interval)
     # Plot all the close prices
-    ((data.pct_change() + 1).cumprod()).plot(figsize=(10, 7))
+    ((data['Close'].pct_change() + 1).cumprod()).plot(figsize=(10, 7))
 
     # Show the legend
     plt.legend()
@@ -43,6 +43,30 @@ def plot_stock_data(tickers_list, time_duration, time_interval):
     # Plot the grid lines
     plt.grid(which="major", color='k', linestyle='-.', linewidth=0.5)
     plt.show()
+
+
+def plot_stock_data_stored(tickers_list):
+    for t in tickers_list:
+        if exists(config['path'] + '/' + t + '.csv'):
+            data = pd.read_csv(config['path'] + '/' + t + '.csv')
+            # Plot all the close prices
+            ((data['Close'].pct_change() + 1).cumprod()).plot(figsize=(10, 7))
+
+            # Show the legend
+            plt.legend()
+
+            # Define the label for the title of the figure
+            plt.title(str(t) + " Returns", fontsize=16)
+
+            # Define the labels for x-axis and y-axis
+            plt.ylabel('Cumulative Returns', fontsize=14)
+            plt.xlabel('Year', fontsize=14)
+
+            # Plot the grid lines
+            plt.grid(which="major", color='k', linestyle='-.', linewidth=0.5)
+            plt.show()
+        else:
+            print('Ticker ' + str(t) + ' not stored locally in path.')
 
 
 def get_sp500():
@@ -76,7 +100,7 @@ def stock_save(tickers_list):
                 if exists(config['path'] + '/' + t + '.csv'):
                     original_data = pd.read_csv(config['path'] + '/' + t + '.csv')
                     merge_data = pd.merge(new_data, original_data, how='outer')
-                    merge_data.to_csv(config['path'] + '/' + t + '.csv')
+                    merge_data.to_csv(config['path'] + '/' + t + '.csv', index=False)
                 else:
                     new_data.to_csv(config['path'] + '/' + t + '.csv')
 
@@ -108,3 +132,4 @@ if __name__ == '__main__':
     for t in config['tickers']:
         tick_list.append(t)
     stock_save(tick_list)
+    # plot_stock_data_stored(tick_list)
