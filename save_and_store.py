@@ -71,12 +71,12 @@ def stock_save(tickers_list):
                                interval='5m',
                                group_by='ticker',
                                threads='True')
-            if ~new_data.empty:
+            if not new_data.empty:
                 # EXPORT DATA TO BETTER MANIPULATE
                 if exists(config['path'] + '/' + t + '.csv'):
                     original_data = pd.read_csv(config['path'] + '/' + t + '.csv')
-                    new_data.merge(original_data)
-                    new_data.to_csv(config['path'] + '/' + t + '.csv')
+                    merge_data = pd.merge(new_data, original_data, how='outer')
+                    merge_data.to_csv(config['path'] + '/' + t + '.csv')
                 else:
                     new_data.to_csv(config['path'] + '/' + t + '.csv')
 
